@@ -1,120 +1,144 @@
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import os
 import requests
-import re
-from datetime import datetime
+from uuid import uuid4
+import telebot
+import time
+import sqlite3
 
-BOT_TOKEN = "7723535106:AAH_8dQhq7QwVWh5JZf2iTrW4pgrT7vIykQ"
+# ضع توكن البوت هنا مباشرة
+TOKEN = "8155271835:AAHoCTwDe5laiIRFiQerj7EKRygg1JHDOkA"  # مثال: "123456789:ABCdefGHI..."
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+bot = telebot.TeleBot(TOKEN)
+
+# إعداد قاعدة البيانات
+conn = sqlite3.connect("users.db", check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, token TEXT)")
+conn.commit()
+
+welcome_message = (
+    "مرحبًا بك معنا 💜!\n\n"
+    "بوت Flexy تفعيل الإنترنت بسهولة وسرعة 🚀.\n\n"
+    "كل ما عليك هو إرسال رقم الهاتف الخاص بك مع إدخال رمز التحقق.\n"
+    "لنبدأ الآن! 📱"
 )
 
-user_sessions = {}
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 أرسل رقمك بدون 213، مثال: 773260982")
-
-async def handle_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    number = update.message.text.strip()
-    if not number.isdigit() or len(number) != 9:
-        await update.message.reply_text("❌ الرقم غير صحيح، لازم يكون 9 أرقام.")
-        return
-
-    msisdn = "213" + number
-    user_sessions[update.message.from_user.id] = {"msisdn": msisdn}
-
-    data = {
-        "msisdn": msisdn,
-        "client_id": "6E6CwTkp8H1CyQxraPmcEJPQ7xka",
-        "scope": "smsotp"
-    }
+def send_otp(phone_number):
     headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Djezzy/2.6.6"
+        'Accept': 'application/json, text/plain, */*',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': generate_user_agent(),
     }
-
-    r = requests.post("https://apim.djezzy.dz/oauth2/registration", data=data, headers=headers).text
-    if "confirmation code has been sent" in r:
-        await update.message.reply_text("✅ تم إرسال الرمز. أرسله هكذا:\n/otp 123456")
-    else:
-        await update.message.reply_text("❌ فشل إرسال الرمز. حاول مجددًا.")
-
-async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if not args:
-        await update.message.reply_text("❌ اكتب الرمز هكذا:\n/otp 123456")
-        return
-
-    user_id = update.message.from_user.id
-    if user_id not in user_sessions:
-        await update.message.reply_text("❗ أرسل رقمك أولاً.")
-        return
-
-    otp = args[0]
-    msisdn = user_sessions[user_id]["msisdn"]
-
     data = {
-        "otp": otp,
-        "mobileNumber": msisdn,
-        "scope": "openid",
-        "client_id": "6E6CwTkp8H1CyQxraPmcEJPQ7xka",
-        "client_secret": "MVpXHW_ImuMsxKIwrJpoVVMHjRsa",
-        "grant_type": "mobile"
+        'grant_type': 'password',
+        'username': f'213{phone_number}',
+        'client_id': 'myooredoo-app',
     }
+    response = requests.post(
+        'https://apis.ooredoo.dz/api/auth/realms/myooredoo/protocol/openid-connect/token',
+        headers=headers,
+        data=data,
+    )
+    return response.status_code == 403
+
+def verify_otp(phone_number, otp):
     headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "Djezzy/2.6.6"
+        'Accept': 'application/json, text/plain, */*',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': generate_user_agent(),
+        'X-Correlation-ID': str(uuid4()),
     }
-
-    res = requests.post("https://apim.djezzy.dz/oauth2/token", data=data, headers=headers).json()
-    token = res.get("access_token")
-    if not token:
-        await update.message.reply_text("❌ رمز OTP غير صالح.")
-        return
-
-    json_data = {
-        "data": {
-            "id": "GIFTWALKWIN",
-            "type": "products",
-            "meta": {
-                "services": {
-                    "steps": 10666,
-                    "code": "GIFTWALKWIN2GO",
-                    "id": "WALKWIN"
-                }
-            }
-        }
+    data = {
+        'grant_type': 'password',
+        'username': f'213{phone_number}',
+        'client_id': 'myooredoo-app',
+        'otp': otp,
     }
+    try:
+        response = requests.post(
+            'https://apis.ooredoo.dz/api/auth/realms/myooredoo/protocol/openid-connect/token',
+            headers=headers,
+            data=data,
+        ).json()
+        return response.get("access_token")
+    except:
+        return None
 
-    r = requests.post(
-        f"https://apim.djezzy.dz/djezzy-api/api/v1/subscribers/{msisdn}/subscription-product?include=",
+def activate_internet(access_token):
+    headers = {
+        'Accept': 'application/json, text/plain, */*',
+        'Authorization': f'Bearer {access_token}',
+        'User-Agent': generate_user_agent(),
+    }
+    json_data = {'mgmValue': '6GB'}
+    requests.post(
+        'https://apis.ooredoo.dz/api/ooredoo-bff/users/mgm/info/apply',
+        headers=headers,
         json=json_data,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    ).text
+    )
+    time.sleep(5)
+    requests.put(
+        'https://apis.ooredoo.dz/api/ooredoo-bff/users/mgm/redeem',
+        headers=headers,
+    )
 
-    if "successfully done" in r:
-        await update.message.reply_text("✅ تم الاشتراك في العرض بنجاح!")
-    elif "nextEligibilityDate" in r:
-        match = re.search(r'"nextEligibilityDate":"([^"]+)"', r)
-        if match:
-            next_time = datetime.fromisoformat(match.group(1))
-            diff = next_time - datetime.now()
-            await update.message.reply_text(f"⏳ مازال {diff.days} يوم و {diff.seconds//3600} ساعة باش تعاود تسجل.")
+def get_balance(access_token):
+    headers = {
+        'Accept': 'application/json, text/plain, */*',
+        'Authorization': f'Bearer {access_token}',
+        'User-Agent': generate_user_agent(),
+    }
+    try:
+        response = requests.get(
+            'https://apis.ooredoo.dz/api/ooredoo-bff/subscriptions/getAccountInfo',
+            headers=headers,
+        ).json()
+        return response.get('accountBalance'), response.get('msisdn')
+    except:
+        return None, None
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    if message.chat.type != 'private':
+        bot.send_message(message.chat.id, "❌ هذا البوت يعمل في الخاص فقط.")
+        return
+
+    if message.text.startswith("05") and len(message.text) == 10:
+        phone_number = message.text[1:]
+
+        cursor.execute("SELECT token FROM users WHERE phone = ?", (phone_number,))
+        result = cursor.fetchone()
+
+        if result:
+            access_token = result[0]
+            bot.send_message(message.chat.id, "✅ تم تسجيل الدخول. يتم الآن تفعيل الإنترنت...")
+            activate_internet(access_token)
+            balance, phone = get_balance(access_token)
+            msg = f"✅ تم التفعيل.\nرصيدك: {balance} دج.\nرقمك: {phone}"
+            bot.send_message(message.chat.id, msg)
         else:
-            await update.message.reply_text("⚠️ لا يمكنك الاشتراك الآن.")
+            bot.send_message(message.chat.id, "جاري إرسال رمز التحقق...")
+            if send_otp(phone_number):
+                bot.send_message(message.chat.id, "✅ تم إرسال الرمز. أدخل رمز التحقق.")
+                bot.register_next_step_handler(message, process_otp, phone_number)
+            else:
+                bot.send_message(message.chat.id, "تعذر الإرسال. جرب فتح تطبيق My Ooredoo ثم أعد المحاولة.")
     else:
-        await update.message.reply_text("❌ فشل غير متوقع:\n" + r)
+        bot.send_message(message.chat.id, welcome_message)
 
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("otp", handle_otp))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_number))
-    print("✅ البوت شغال على Render...")
-    app.run_polling()
+def process_otp(message, phone_number):
+    otp = message.text
+    bot.send_message(message.chat.id, "جارٍ التحقق من الرمز...")
+    access_token = verify_otp(phone_number, otp)
+    if access_token:
+        cursor.execute("INSERT INTO users (phone, token) VALUES (?, ?)", (phone_number, access_token))
+        conn.commit()
+        bot.send_message(message.chat.id, "✅ تم التحقق. جارٍ التفعيل...")
+        activate_internet(access_token)
+        balance, phone = get_balance(access_token)
+        msg = f"✅ تم التفعيل.\nرصيدك: {balance} دج.\nرقمك: {phone}"
+        bot.send_message(message.chat.id, msg)
+    else:
+        bot.send_message(message.chat.id, "❌ رمز تحقق خاطئ. حاول مرة أخرى.")
 
-if __name__ == "__main__":
-    main()
+bot.polling(none_stop=True)
