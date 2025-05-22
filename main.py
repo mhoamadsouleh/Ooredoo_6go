@@ -4,17 +4,24 @@ from uuid import uuid4
 import telebot
 import time
 import sqlite3
+import random
 
-# ضع توكن البوت هنا مباشرة
-TOKEN = "8155271835:AAHoCTwDe5laiIRFiQerj7EKRygg1JHDOkA"  # مثال: "123456789:ABCdefGHI..."
+TOKEN = "8155271835:AAHoCTwDe5laiIRFiQerj7EKRygg1JHDOkA"
 
 bot = telebot.TeleBot(TOKEN)
 
-# إعداد قاعدة البيانات
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS users (phone TEXT PRIMARY KEY, token TEXT)")
 conn.commit()
+
+def generate_user_agent():
+    agents = [
+        "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 Chrome/91.0.4472.114 Mobile Safari/537.36",
+        "Mozilla/5.0 (Linux; Android 11; Pixel 4 XL) AppleWebKit/537.36 Chrome/91.0.4472.114 Mobile Safari/537.36",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+    ]
+    return random.choice(agents)
 
 welcome_message = (
     "مرحبًا بك معنا 💜!\n\n"
